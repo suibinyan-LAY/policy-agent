@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>企业制度问答助手</title>
+<style>
+  :root {
+    --bg: #F7F7F8;
+    --surface: #FFFFFF;
+    --muted: #F0F0F2;
+    --text: #171717;
+    --text-2: #52525B;
+    --text-3: #8B8B94;
+    --border: #E4E4E7;
+    --brand: #0FDC78;
+    --brand-ink: #004D26;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 48px;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+  }
+  .app { width: 100%; max-width: 760px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
+  select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+  }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab {
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .tab.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+  #log {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 320px;
+    max-height: 60vh;
+    overflow-y: auto;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .msg { margin-bottom: 18px; }
+  .role { font-size: 12px; color: var(--text-3); margin-bottom: 4px; }
+  .bubble { white-space: pre-wrap; word-break: break-word; }
+  .user .bubble { color: var(--text); }
+  .ai .bubble { color: var(--text-2); }
+  .meta { font-size: 12px; color: var(--text-3); margin-top: 8px; }
+  .steps {
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--muted);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-2);
+    white-space: pre-wrap;
+  }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  input[type="text"] {
+    flex: 1;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 15px;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--brand); }
+  button#send {
+    padding: 12px 22px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--brand);
+    color: var(--brand-ink);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button#send:disabled { opacity: .45; cursor: default; }
+  .hint { margin-top: 10px; font-size: 12px; color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>企业制度问答助手</h1>
+      <div class="sub">RAG 检索 · Agent 工具调用 · 流式输出</div>
+    </div>
+    <select id="model"></select>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-mode="chat">普通对话</button>
+    <button class="tab" data-mode="kb">知识库问答</button>
+    <button class="tab" data-mode="agent">Agent 模式</button>
+  </div>
+
+  <div id="log"></div>
+
+  <div class="row">
+    <input id="q" type="text" placeholder="试试：上海出差住宿一晚最多能报多少？" autocomplete="off">
+    <button id="send">发送</button>
+  </div>
+  <div class="hint" id="hint">普通对话：纯聊天，不带资料 · 知识库问答：先检索再回答 · Agent：模型自己决定要不要查</div>
+</div>
+
+<script>
+const log = document.getElementById('log');
+const input = document.getElementById('q');
+const btn = document.getElementById('send');
+const modelSel = document.getElementById('model');
+const hint = document.getElementById('hint');
+
+let mode = 'chat';
+let history = [];
+
+const HINTS = {
+  chat: '普通对话：纯聊天，模型只靠自己的知识回答',
+  kb: '知识库问答：先从 data/ 里的文档检索，再依据原文回答',
+  agent: 'Agent 模式：模型自己决定调不调 search_policy 工具，并显示执行轨迹'
+};
+
+// ---------- 模型列表 ----------
+fetch('/api/config').then(r => r.json()).then(cfg => {
+  modelSel.innerHTML = cfg.models.map(m => `<option value="${m}">${m}</option>`).join('');
+  modelSel.value = cfg.default;
+}).catch(() => {
+  modelSel.innerHTML = '<option>无法读取配置</option>';
+});
+
+// ---------- 切换模式 ----------
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    mode = tab.dataset.mode;
+    hint.textContent = HINTS[mode];
+  });
+});
+
+// ---------- 渲染 ----------
+function addMessage(role, text, extra) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+  wrap.innerHTML = `<div class="role">${role === 'user' ? '你' : 'AI'}</div>
+                    <div class="bubble"></div>`;
+  wrap.querySelector('.bubble').textContent = text;
+  if (extra) {
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = extra;
+    wrap.appendChild(meta);
+  }
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap.querySelector('.bubble');
+}
+
+// ---------- 发送 ----------
+async function send() {
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+  btn.disabled = true;
+
+  addMessage('user', q);
+
+  if (mode === 'agent') {
+    await runAgent(q);
+  } else {
+    await runChat(q);
+  }
+
+  btn.disabled = false;
+  input.focus();
+}
+
+async function runChat(q) {
+  const bubble = addMessage('ai', '');
+
+  const resp = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      q,
+      model: modelSel.value,
+      history,
+      use_kb: mode === 'kb'
+    })
+  });
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let answer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+
+    for (const part of parts) {
+      if (!part.startsWith('data: ')) continue;
+      const payload = part.slice(6);
+      if (payload === '[DONE]') continue;
+
+      let evt;
+      try { evt = JSON.parse(payload); } catch { continue; }
+
+      if (evt.type === 'delta') {
+        answer += evt.text;
+        bubble.textContent = answer;
+        log.scrollTop = log.scrollHeight;
+      } else if (evt.type === 'status') {
+        bubble.textContent = evt.text;
+      } else if (evt.type === 'sources') {
+        const list = evt.sources.map(s => `${s.source}（${s.score}）`).join(' · ');
+        bubble.textContent = answer || '';
+        bubble.parentElement.insertAdjacentHTML(
+          'beforeend',
+          `<div class="meta">依据：${list}</div>`
+        );
+      } else if (evt.type === 'error') {
+        bubble.textContent = '出错了：' + evt.text;
+      }
+    }
+  }
+
+  if (answer) {
+    history.push({ role: 'user', content: q });
+    history.push({ role: 'assistant', content: answer });
+  }
+}
+
+async function runAgent(q) {
+  const bubble = addMessage('ai', '思考中…');
+
+  const resp = await fetch('/api/agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q, model: modelSel.value })
+  });
+  const data = await resp.json();
+
+  if (data.error) {
+    bubble.textContent = '出错了：' + data.error;
+    return;
+  }
+
+  bubble.textContent = data.answer || '（没有回答）';
+
+  const parent = bubble.parentElement;
+  if (data.steps && data.steps.length) {
+    const trace = data.steps
+      .map((s, i) => `${i + 1}. 调用 ${s.tool}(${JSON.stringify(s.args)})`)
+      .join('\n');
+    parent.insertAdjacentHTML('beforeend', `<div class="steps">${trace}</div>`);
+  }
+  if (data.sources && data.sources.length) {
+    const list = data.sources
+      .map(s => `${s.source}（${s.score}）`)
+      .join(' · ');
+    parent.insertAdjacentHTML('beforeend', `<div class="meta">依据：${list}</div>`);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+btn.addEventListener('click', send);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') send();
+});
+</script>
+</body>
+</html>
