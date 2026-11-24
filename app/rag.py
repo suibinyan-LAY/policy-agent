@@ -1,24 +1,68 @@
-"""最小可用的 RAG：读文档 → 切块 → 向量化 → 余弦检索。
+"""最小可用的 RAG：读文档 → 递归切块 → 向量化 → 余弦检索。
 
-真实项目会换成递归切分 + 专业向量库（Chroma、pgvector）+ 重排序，
-但骨架和这里完全一样。
+切分策略（三级，逐级降粒度）：
+1. 先按空行切段落；
+2. 段落超过 MAX_CHUNK 时按句号、问号、分号切成句子；
+3. 单句仍然超长时硬切。
+最后把句子按顺序打包成不超过 MAX_CHUNK 的块，避免出现大量碎片。
 """
 
 import math
+import re
 from functools import lru_cache
 
 from .config import DATA_DIR
 from .llm import embed
+
+MAX_CHUNK = 300
+
+
+def _hard_split(text, size=MAX_CHUNK):
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _split_sentences(paragraph):
+    """把段落切成句子（保留句末标点），超长句硬切。"""
+    pieces = [p.strip() for p in re.split(r"(?<=[。！？；])|\n", paragraph)]
+    out = []
+    for piece in pieces:
+        if not piece:
+            continue
+        if len(piece) > MAX_CHUNK:
+            out.extend(_hard_split(piece))
+        else:
+            out.append(piece)
+    return out
+
+
+def _pack(sentences, max_len=MAX_CHUNK):
+    """把句子按顺序拼成不超过 max_len 的块。"""
+    chunks, buf = [], ""
+    for sentence in sentences:
+        if buf and len(buf) + len(sentence) > max_len:
+            chunks.append(buf)
+            buf = sentence
+        else:
+            buf += sentence
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def split_text(text):
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    sentences = []
+    for para in paragraphs:
+        sentences.extend(_split_sentences(para))
+    return _pack(sentences)
 
 
 def _load_chunks():
     chunks = []
     for path in sorted(DATA_DIR.glob("*.txt")):
         text = path.read_text(encoding="utf-8")
-        for para in text.split("\n\n"):
-            para = para.strip()
-            if para:
-                chunks.append({"text": para, "source": path.name})
+        for piece in split_text(text):
+            chunks.append({"text": piece, "source": path.name})
     return chunks
 
 
@@ -38,7 +82,7 @@ def cosine(a, b):
 
 
 def search(query, top_k=2):
-    """返回最相关的几段资料，带相似度和出处文件名。"""
+    """返回最相关的几段资料，带相似度、原文和出处文件名。"""
     chunks, vectors = _index()
     qv = embed([query])[0]
     scored = sorted(

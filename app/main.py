@@ -64,7 +64,12 @@ def chat(body: dict):
                     {
                         "type": "sources",
                         "sources": [
-                            {"score": h["score"], "source": h["source"]} for h in hits
+                            {
+                                "score": h["score"],
+                                "source": h["source"],
+                                "text": h["text"],
+                            }
+                            for h in hits
                         ],
                     }
                 )

@@ -1,0 +1,13 @@
+{
+  "name": "policy-agent-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "企业制度问答助手 · Node 20 零依赖部署版",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

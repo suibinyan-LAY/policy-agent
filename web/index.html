@@ -76,6 +76,16 @@
     color: var(--text-2);
     white-space: pre-wrap;
   }
+  .snippet {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--muted);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .snippet summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
+  .snippet-body { margin-top: 8px; white-space: pre-wrap; line-height: 1.7; color: var(--text-2); }
+  mark { background: #D9FBE9; color: #004D26; border-radius: 3px; padding: 0 2px; }
   .row { display: flex; gap: 8px; margin-top: 12px; }
   input[type="text"] {
     flex: 1;
@@ -238,12 +248,7 @@ async function runChat(q) {
       } else if (evt.type === 'status') {
         bubble.textContent = evt.text;
       } else if (evt.type === 'sources') {
-        const list = evt.sources.map(s => `${s.source}（${s.score}）`).join(' · ');
-        bubble.textContent = answer || '';
-        bubble.parentElement.insertAdjacentHTML(
-          'beforeend',
-          `<div class="meta">依据：${list}</div>`
-        );
+        renderSources(bubble.parentElement, evt.sources, q);
       } else if (evt.type === 'error') {
         bubble.textContent = '出错了：' + evt.text;
       }
@@ -281,12 +286,55 @@ async function runAgent(q) {
     parent.insertAdjacentHTML('beforeend', `<div class="steps">${trace}</div>`);
   }
   if (data.sources && data.sources.length) {
-    const list = data.sources
-      .map(s => `${s.source}（${s.score}）`)
-      .join(' · ');
-    parent.insertAdjacentHTML('beforeend', `<div class="meta">依据：${list}</div>`);
+    renderSources(parent, data.sources, q);
   }
   log.scrollTop = log.scrollHeight;
+}
+
+// 把问题切成两字词，用来在原文里做高亮
+function markTerm(html, term) {
+  const safe = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(safe, 'g');
+  return html
+    .split(/(<[^>]+>)/g)
+    .map(seg => (seg.startsWith('<') ? seg : seg.replace(re, m => `<mark>${m}</mark>`)))
+    .join('');
+}
+
+function highlight(text, query) {
+  const cleaned = query.replace(/[，。？！、；：""''（）()\s]/g, '');
+  const terms = new Set();
+  for (let i = 0; i + 2 <= cleaned.length; i++) terms.add(cleaned.slice(i, i + 2));
+
+  let out = text.replace(/[&<>"]/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
+  }[c]));
+
+  for (const term of terms) out = markTerm(out, term);
+  return out;
+}
+
+// 引用来源 + 可展开的原文片段（命中词高亮）
+function renderSources(parent, sources, query) {
+  const names = sources.map(s => `${s.source}（${s.score}）`).join(' · ');
+  parent.insertAdjacentHTML('beforeend', `<div class="meta">依据：${names}</div>`);
+
+  for (const s of sources) {
+    if (!s.text) continue;
+    const details = document.createElement('details');
+    details.className = 'snippet';
+
+    const summary = document.createElement('summary');
+    summary.textContent = `引用原文 · ${s.source}`;
+
+    const body = document.createElement('div');
+    body.className = 'snippet-body';
+    body.innerHTML = highlight(s.text, query);
+
+    details.appendChild(summary);
+    details.appendChild(body);
+    parent.appendChild(details);
+  }
 }
 
 btn.addEventListener('click', send);
