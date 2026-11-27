@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from . import agent
-from .config import AVAILABLE_MODELS, DEFAULT_MODEL, WEB_DIR
+from .config import DEFAULT_MODEL, MODEL_PRESETS, WEB_DIR, clean_model
 from .llm import chat_stream
 from .rag import build_context, search
 
@@ -37,7 +37,7 @@ def index():
 
 @app.get("/api/config")
 def get_config():
-    return {"models": AVAILABLE_MODELS, "default": DEFAULT_MODEL}
+    return {"models": MODEL_PRESETS, "default": DEFAULT_MODEL}
 
 
 @app.get("/api/health")
@@ -48,12 +48,13 @@ def health():
 @app.post("/api/chat")
 def chat(body: dict):
     question = (body.get("q") or "").strip()
-    model = body.get("model")
+    raw_model = body.get("model")
     history = body.get("history") or []
     use_kb = bool(body.get("use_kb"))
 
     def stream():
         try:
+            model = clean_model(raw_model)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             messages.extend(history[-10:])  # 只带最近 10 条，控制成本
 
@@ -97,7 +98,7 @@ def chat(body: dict):
 def run_agent(body: dict):
     question = (body.get("q") or "").strip()
     try:
-        return agent.run(question, model=body.get("model"))
+        return agent.run(question, model=clean_model(body.get("model")))
     except Exception as exc:
         return {"answer": "", "steps": [], "sources": [], "error": str(exc)}
 

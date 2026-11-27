@@ -96,6 +96,17 @@
     transition: border-color .15s ease, color .15s ease, background .15s ease;
   }
   select:focus { border-color: var(--brand); }
+  .model-custom {
+    width: 168px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12.5px;
+    outline: none;
+  }
+  .model-custom:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(15, 220, 120, .14); }
   .ghost:hover { border-color: var(--brand); color: var(--brand-ink); }
 
   /* ---------- 分段控件 ---------- */
@@ -437,6 +448,7 @@
     </div>
     <div class="tools">
       <select id="model"></select>
+      <input id="customModel" class="model-custom" placeholder="自定义模型 ID" hidden>
       <button class="ghost" id="clear">清空</button>
     </div>
   </div>
@@ -533,11 +545,33 @@ const PLACEHOLDERS = {
   agent: '问一个需要查资料的制度问题…'
 };
 
+const customModel = document.getElementById('customModel');
+
 fetch('/api/config').then(r => r.json()).then(cfg => {
-  modelSel.innerHTML = cfg.models.map(m => `<option value="${m}">${m}</option>`).join('');
+  const options = cfg.models.map(m => {
+    const id = typeof m === 'string' ? m : m.id;
+    const label = typeof m === 'string' ? m : (m.label || m.id);
+    return `<option value="${id}">${label}</option>`;
+  });
+  options.push('<option value="__custom__">自定义模型…</option>');
+  modelSel.innerHTML = options.join('');
   modelSel.value = cfg.default;
 }).catch(() => {
   modelSel.innerHTML = '<option>无法读取配置</option>';
+});
+
+function currentModel() {
+  return modelSel.value === '__custom__' ? customModel.value.trim() : modelSel.value;
+}
+
+modelSel.addEventListener('change', () => {
+  const custom = modelSel.value === '__custom__';
+  customModel.hidden = !custom;
+  if (custom) {
+    customModel.focus();
+  } else {
+    hint.textContent = HINTS[mode];
+  }
 });
 
 document.querySelectorAll('.seg button').forEach(tab => {
@@ -637,6 +671,12 @@ async function send() {
   const q = input.value.trim();
   if (!q) return;
 
+  if (!currentModel()) {
+    hint.textContent = '请填写自定义模型 ID，或从下拉框里选一个';
+    customModel.focus();
+    return;
+  }
+
   input.value = '';
   btn.disabled = true;
   addMessage('user', q);
@@ -664,7 +704,7 @@ async function runChat(q) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       q,
-      model: modelSel.value,
+      model: currentModel(),
       history,
       use_kb: mode === 'kb'
     })
@@ -702,7 +742,7 @@ async function runChat(q) {
       } else if (evt.type === 'sources') {
         renderSources(body, evt.sources, q);
       } else if (evt.type === 'error') {
-        bubble.textContent = '出错了：' + evt.text;
+        bubble.textContent = '出错了：' + evt.text + modelHint(evt.text);
         started = true;
       }
     }
@@ -721,12 +761,12 @@ async function runAgent(q) {
   const resp = await fetch('/api/agent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q, model: modelSel.value })
+    body: JSON.stringify({ q, model: currentModel() })
   });
   const data = await resp.json();
 
   if (data.error) {
-    bubble.textContent = '出错了：' + data.error;
+    bubble.textContent = '出错了：' + data.error + modelHint(data.error);
     return;
   }
 
@@ -747,6 +787,13 @@ async function runAgent(q) {
   }
 
   log.scrollTop = log.scrollHeight;
+}
+
+// 模型报错时给一句可操作的提示
+function modelHint(text) {
+  return /400|model|模型/i.test(text)
+    ? '（可以换个模型，或用「自定义模型」填写你账号下可用的模型 ID）'
+    : '';
 }
 
 // 把问题切成两字词，用来在原文里做高亮

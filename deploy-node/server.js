@@ -8,10 +8,33 @@ const PORT = Number(process.env.PORT || 8000);
 const BASE_URL =
   process.env.LLM_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = process.env.LLM_MODEL || 'deepseek-v4.1-flash';
-const MODELS = (process.env.LLM_MODELS || 'deepseek-v4.1-flash,qwen-turbo,qwen-plus')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const DEFAULT_PRESETS = [
+  { id: 'deepseek-v4.1-flash', label: 'deepseek-v4.1-flash · 默认' },
+  { id: 'qwen-turbo', label: 'qwen-turbo · 快而省' },
+  { id: 'qwen-plus', label: 'qwen-plus · 均衡' },
+  { id: 'qwen-max', label: 'qwen-max · 最强' },
+  { id: 'qwen-long', label: 'qwen-long · 长文档' },
+  { id: 'deepseek-v3', label: 'deepseek-v3 · 通用' },
+  { id: 'deepseek-r1', label: 'deepseek-r1 · 推理' },
+];
+
+// 环境变量 LLM_MODELS 可覆盖预设（逗号分隔），换平台时不用改代码
+const MODELS = process.env.LLM_MODELS
+  ? process.env.LLM_MODELS.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((id) => ({ id, label: id }))
+  : DEFAULT_PRESETS;
+
+const MODEL_PATTERN = /^[A-Za-z0-9._:/-]{1,64}$/;
+
+function cleanModel(name) {
+  const model = String(name || DEFAULT_MODEL).trim();
+  if (!MODEL_PATTERN.test(model)) {
+    throw new Error('模型名不合法，请从下拉框选择，或填写正确的模型 ID');
+  }
+  return model;
+}
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-v3';
 
 const ROOT = __dirname;
@@ -193,7 +216,7 @@ async function handleChat(req, res) {
   const key = apiKeyOf(req);
   const body = await readBody(req);
   const q = String(body.q || '').trim();
-  const model = body.model || DEFAULT_MODEL;
+  const rawModel = body.model;
   const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
   const useKb = Boolean(body.use_kb);
 
@@ -205,6 +228,7 @@ async function handleChat(req, res) {
   });
 
   try {
+    const model = cleanModel(rawModel);
     const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
     for (const m of history) {
       if (m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string') {
@@ -302,7 +326,7 @@ async function handleAgent(req, res) {
   const key = apiKeyOf(req);
   const body = await readBody(req);
   const question = String(body.q || '').trim();
-  const model = body.model || DEFAULT_MODEL;
+  const model = cleanModel(body.model);
 
   const messages = [
     { role: 'system', content: AGENT_PROMPT },
